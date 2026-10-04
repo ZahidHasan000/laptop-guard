@@ -10,29 +10,40 @@ warn() { echo -e "${YELLOW}[!]${NC} $1"; }
 err()  { echo -e "${RED}[✗]${NC} $1"; exit 1; }
 info() { echo -e "${BLUE}[•]${NC} $1"; }
 
-[[ $EUID -ne 0 ]] && err "sudo bash install-preboot.sh দিয়ে চালান"
+[[ $EUID -ne 0 ]] && err "Please run as root: sudo bash install-preboot.sh"
 
 echo ""
 echo -e "${BOLD}Laptop Guard — Pre-boot Capture Setup${NC}"
 echo ""
-echo "  কী করবে:"
-echo "  ✅ LUKS prompt-এর আগে camera capture"
-echo "  ✅ Ethernet থাকলে server-এ upload"
-echo "  ✅ Ethernet না থাকলে /run/lg-handoff/ (RAM)"
-echo "  ✅ Ubuntu boot হলে pickup করে queue-এ দেয়"
+echo "  Actions taken:"
+echo "  ✅ Pre-LUKS camera capture before passphrase prompt"
+echo "  ✅ Direct server upload if Ethernet is connected"
+echo "  ✅ Save evidence to /run/lg-handoff/ (RAM) if offline"
+echo "  ✅ Ubuntu picks up handoff on boot and enqueues it"
 echo ""
 echo -e "${YELLOW}  HP EliteBook 845 G10 Note:${NC}"
-echo "  Built-in Ethernet নেই — USB-C adapter লাগবে upload-এর জন্য"
-echo "  Adapter ছাড়া: capture → RAM → Ubuntu boot → pickup → upload"
+echo "  No built-in Ethernet — requires USB-C adapter for instant upload"
+echo "  Without adapter: capture → RAM → Ubuntu boot → pickup → upload"
 echo ""
 read -rp "  Continue? (y/n): " C
 [[ "$C" != "y" && "$C" != "Y" ]] && exit 0
 
 # Files check
-[[ ! -f "./lg-capture-hook" ]]   && err "lg-capture-hook নেই"
-[[ ! -f "./lg-capture-script" ]] && err "lg-capture-script নেই"
-[[ ! -f "./preboot_pickup.py" ]] && err "preboot_pickup.py নেই"
-[[ ! -f "/etc/laptop-guard/config.json" ]] && err "setup.sh আগে চালান"
+[[ ! -f "./lg-capture-hook" ]]   && err "lg-capture-hook not found"
+[[ ! -f "./lg-capture-script" ]] && err "lg-capture-script not found"
+
+PICKUP_SRC=""
+if [[ -f "../agent/preboot_pickup.py" ]]; then
+    PICKUP_SRC="../agent/preboot_pickup.py"
+elif [[ -f "./preboot_pickup.py" ]]; then
+    PICKUP_SRC="./preboot_pickup.py"
+elif [[ -f "/etc/laptop-guard/preboot_pickup.py" ]]; then
+    PICKUP_SRC="/etc/laptop-guard/preboot_pickup.py"
+else
+    err "preboot_pickup.py not found in agent/ directory"
+fi
+
+[[ ! -f "/etc/laptop-guard/config.json" ]] && err "Please run setup.sh first"
 
 # Dependencies
 command -v fswebcam &>/dev/null || apt-get install -y -qq fswebcam
@@ -58,7 +69,7 @@ ok "Script: /etc/initramfs-tools/scripts/local-top/lg-capture"
 
 # Install pickup module
 sudo chattr -i /etc/laptop-guard/tracker.py 2>/dev/null || true
-cp ./preboot_pickup.py /etc/laptop-guard/preboot_pickup.py
+cp "$PICKUP_SRC" /etc/laptop-guard/preboot_pickup.py
 chmod 700 /etc/laptop-guard/preboot_pickup.py
 chown root:root /etc/laptop-guard/preboot_pickup.py
 ok "Pickup: /etc/laptop-guard/preboot_pickup.py"
@@ -95,17 +106,17 @@ fi
 sudo chattr +i /etc/laptop-guard/tracker.py 2>/dev/null || true
 
 # Rebuild initramfs
-info "initramfs rebuild করছি (1-2 minutes)..."
+info "Rebuilding initramfs (1-2 minutes)..."
 update-initramfs -u -k all 2>&1 | tail -3
 ok "initramfs rebuilt"
 
 echo ""
 echo -e "${GREEN}Pre-boot Setup Complete!${NC}"
 echo ""
-echo "  Test করুন:"
+echo "  Verification Steps:"
 echo "  1. sudo reboot"
-echo "  2. LUKS passphrase দিন"  
-echo "  3. Ubuntu login করুন"
+echo "  2. Enter LUKS passphrase"  
+echo "  3. Log in to Ubuntu"
 echo "  4. sudo tail -20 /var/lib/laptop-guard/laptop-guard.log | grep -i preboot"
-echo "  5. Gmail check করুন — 'Pre-boot' email আসা উচিত"
+echo "  5. Check Gmail — 'Pre-boot' email alert should arrive"
 echo ""
