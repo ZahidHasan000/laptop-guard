@@ -1,0 +1,45 @@
+#!/bin/sh
+# ════════════════════════════════════════════════════════════════════
+# Laptop Guard — initramfs Hook (Pre-boot Capture)
+# Copies fswebcam, curl, and camera drivers into the initramfs ramdisk
+# ════════════════════════════════════════════════════════════════════
+
+PREREQ=""
+
+prereqs()
+{
+    echo "$PREREQ"
+}
+
+case $1 in
+prereqs)
+    prereqs
+    exit 0
+    ;;
+esac
+
+. /usr/share/initramfs-tools/hook-functions
+
+# 1. Camera & Video kernel modules
+manual_add_modules uvcvideo
+manual_add_modules videodev
+manual_add_modules v4l2loopback 2>/dev/null || true
+
+# 2. Network modules (for optional pre-boot Ethernet upload)
+manual_add_modules r8152 2>/dev/null || true
+manual_add_modules cdc_ether 2>/dev/null || true
+manual_add_modules e1000e 2>/dev/null || true
+manual_add_modules igc 2>/dev/null || true
+
+# 3. Binaries and dependencies
+if command -v fswebcam >/dev/null 2>&1; then
+    copy_exec /usr/bin/fswebcam /usr/bin/fswebcam
+else
+    echo "laptop-guard: WARNING: fswebcam not found on host!" >&2
+fi
+
+if command -v curl >/dev/null 2>&1; then
+    copy_exec /usr/bin/curl /usr/bin/curl
+fi
+
+exit 0

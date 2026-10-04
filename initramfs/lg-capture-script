@@ -1,0 +1,86 @@
+#!/bin/sh
+# ════════════════════════════════════════════════════════════════════
+# Laptop Guard — Pre-boot Capture Script (local-top)
+# Runs before LUKS passphrase prompt in initramfs.
+# Captures webcam image and stores in /run/lg-handoff/ (RAM).
+# If network is available, uploads directly to remote server.
+# ════════════════════════════════════════════════════════════════════
+
+PREREQ=""
+
+prereqs()
+{
+    echo "$PREREQ"
+}
+
+case $1 in
+prereqs)
+    prereqs
+    exit 0
+    ;;
+esac
+
+HANDOFF_DIR="/run/lg-handoff"
+mkdir -p "$HANDOFF_DIR"
+LOG_FILE="$HANDOFF_DIR/boot.log"
+
+echo "[laptop-guard] Starting pre-boot capture..." >> "$LOG_FILE"
+
+# 1. Ensure camera kernel module is loaded
+modprobe uvcvideo >> "$LOG_FILE" 2>&1 || true
+
+# 2. Wait up to 3 seconds for video device to appear
+CAM=""
+for i in 1 2 3; do
+    for dev in /dev/video0 /dev/video1 /dev/video2 /dev/video3; do
+        if [ -c "$dev" ]; then
+            CAM="$dev"
+            break 2
+        fi
+    done
+    sleep 1
+done
+
+IMG="$HANDOFF_DIR/capture.jpg"
+TS=$(date -u +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || date +"%Y-%m-%dT%H:%M:%SZ")
+
+if [ -n "$CAM" ]; then
+    echo "[laptop-guard] Found camera: $CAM" >> "$LOG_FILE"
+    if [ -x /usr/bin/fswebcam ]; then
+        # skip 10 frames for sensor exposure and warm-up
+        /usr/bin/fswebcam --device "$CAM" --resolution 1280x720 --no-banner --quiet --skip 10 "$IMG" >> "$LOG_FILE" 2>&1 || true
+    else
+        echo "[laptop-guard] fswebcam not found in initramfs" >> "$LOG_FILE"
+    fi
+else
+    echo "[laptop-guard] No video device found" >> "$LOG_FILE"
+fi
+
+# 3. Create metadata JSON for pickup module in Ubuntu
+cat > "$HANDOFF_DIR/meta.json" << EOF
+{
+    "event_type": "preboot_capture",
+    "stage": "pre_luks",
+    "timestamp": "$TS",
+    "public_ip": "unknown",
+    "camera_device": "$CAM",
+    "network": {}
+}
+EOF
+
+# 4. Optional: Direct remote upload if Ethernet is connected and API config is set
+API_URL="__API_URL__"
+API_TOKEN="__API_TOKEN__"
+
+if [ -n "$API_URL" ] && [ -f "$IMG" ] && [ -s "$IMG" ] && command -v curl >/dev/null 2>&1; then
+    echo "[laptop-guard] Attempting direct pre-boot upload to $API_URL..." >> "$LOG_FILE"
+    META_JSON=$(cat "$HANDOFF_DIR/meta.json" 2>/dev/null | tr '\n' ' ')
+    curl -s -m 5 -X POST "${API_URL}/api/v1/preboot/image" \
+        -H "Authorization: Bearer ${API_TOKEN}" \
+        -H "Content-Type: image/jpeg" \
+        -H "X-Lg-Meta: ${META_JSON}" \
+        --data-binary "@${IMG}" >> "$LOG_FILE" 2>&1 || true
+fi
+
+echo "[laptop-guard] Pre-boot capture finished. Continuing boot." >> "$LOG_FILE"
+exit 0

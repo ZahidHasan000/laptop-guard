@@ -1,0 +1,17 @@
+# Secrets - NEVER commit
+config.json
+guard.key
+device-id
+.disarmed
+.env
+
+# Runtime
+*.lgq
+*.log
+.last_run
+__pycache__/
+*.pyc
+
+# Server
+events.db
+images/
